@@ -7,6 +7,8 @@ Uint32 timeleft();
 void DrawPixel(SDL_Surface *screen,
         int x, int y, Uint8 R, Uint8 G, Uint8 B);
 int cal_pixel(complex c);
+void static_div(int myid, int num_procs, char **pixels);
+void single_proc(char **pixels);
 
 // main loop, updates bodies, draws them and handels events
 void run(int myid, int num_procs)
@@ -14,39 +16,120 @@ void run(int myid, int num_procs)
     SDL_Surface *screen = SDL_GetVideoSurface();
     SDL_Event event;
     bool running = true;
+    double start_time;
+    char colour;
     int z = 0;
-    complex c;
-    double ratioX = 4.0 / SCREEN_RES_X;
-    double ratioY = 4.0 / SCREEN_RES_Y;
+    char **pixels = (char**) malloc(sizeof(char*) * SCREEN_RES_Y);
+
+    for(int i = 0; i < SCREEN_RES_X; i++)
+        pixels[i] = (char*) malloc(sizeof(char) * SCREEN_RES_X);
+
+
+    // calculate each pixel
+    start_time = MPI_Wtime();
+
+    if(myid == 0) {
+        single_proc(pixels);
+        printf("time %f\n", MPI_Wtime() - start_time);
+    }
 
     while(running) {
 
-        for(int x=0; x < SCREEN_RES_X; x++) {
-            for(int y = 0; y < SCREEN_RES_Y && running; y++) {
+        // display the pixels
+        if(myid == 0) 
+        {
+            for(int y = 0; y < SCREEN_RES_Y; y++) {
+                for(int x = 0; x < SCREEN_RES_X && running; x++) {
+                    colour = pixels[y][x];
+                    DrawPixel(screen, x, y, colour, colour, colour);
+                }
 
-                c.R = (x - (SCREEN_RES_X / 2)) * ratioX;
-                c.I = ((SCREEN_RES_Y / 2) - y) * ratioY;
-
-                int colour = cal_pixel(c);
-                printf("(%.2f %.2f) ", c.R, c.I);
-                fflush(stdout);
-                DrawPixel(screen, x, y, colour, 0, 0);
-            }
-
-            if(myid == 0) {
                 // process incoming events
                 while(SDL_PollEvent(&event))
                     if(event.type == SDL_QUIT)
                         running = false;
             }
+
+            SDL_Flip(screen);
         }
 
-        SDL_Flip(screen);
-
         //SDL_Delay(timeleft()); // sleep for framerate
-        // sync is running
-        //MPI_Bcast(&running, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
     }
+}
+
+// assign each process a set number of tasks
+void static_div(int myid, int num_procs, char **pixels) 
+{
+    complex c;
+    double ratioX = 4.0 / SCREEN_RES_X;
+    double ratioY = 4.0 / SCREEN_RES_Y;
+    int rows_low, rows_high, rows_div, pos = 0;
+    char *row, *buffer;
+    MPI_Status status;
+    
+    // divide up the rows
+    rows_div = SCREEN_RES_Y / num_procs;
+    buffer = (char*) malloc(sizeof(char) * (rows_div * SCREEN_RES_X));
+    rows_high = rows_div * myid;
+    rows_low = rows_high - rows_div;
+
+    // each proc calculates the rows assigned
+    for(int y = rows_low; y < rows_high; y++) {
+        row = (char*) malloc(sizeof(char) * SCREEN_RES_X);
+        c.I = ((SCREEN_RES_Y / 2) - y) * ratioY;
+
+        for(int x = 0; x < SCREEN_RES_X; x++) {
+            c.R = (x - (SCREEN_RES_X / 2)) * ratioX;
+            if(myid == 0) // master just adds the rows to the pixels
+                pixels[y][x] = cal_pixel(c);
+            else
+                row[x] = cal_pixel(c);
+        }
+
+        if(myid != 0) // pack row into a buffer
+            MPI_Pack(row, SCREEN_RES_X, MPI_CHAR, 
+                buffer, rows_div * SCREEN_RES_X, &pos, MPI_COMM_WORLD);
+    }
+
+    if(myid != 0) // send the buffer to the master
+        MPI_Send(buffer, pos, MPI_PACKED, PIXEL_TAG, 0, MPI_COMM_WORLD);
+
+
+    // recieve buffer and add to pixels
+    if(myid == 0) {
+        // i substitutes proc id
+        for(int i = 1; i < num_procs; i++) {
+            rows_high = rows_div * i;
+            rows_low = rows_high - rows_div;
+
+            MPI_Recv(buffer, rows_div * SCREEN_RES_X, MPI_CHAR, i, 
+                    PIXEL_TAG, MPI_COMM_WORLD, &status);
+            printf("recieved from %d\n", i);
+
+            for(int y = rows_low, k = 0; y < rows_high; y++) {
+                for(int x = 0; x < SCREEN_RES_X; x++, k++) {
+                    buffer[k] = pixels[y][x];
+                }
+            }
+        }
+    }
+}
+
+
+void single_proc(char **pixels)
+{
+    complex c;
+    double ratioX = 4.0 / SCREEN_RES_X;
+    double ratioY = 4.0 / SCREEN_RES_Y;
+
+    for(int y = 0; y < SCREEN_RES_Y; y++) {
+        c.I = ((SCREEN_RES_Y / 2) - y) * ratioY;
+        for(int x = 0; x < SCREEN_RES_X; x++) {
+            c.R = (x - (SCREEN_RES_X / 2)) * ratioX;
+            pixels[y][x] = cal_pixel(c);
+        }
+    }
+
 }
 
 int cal_pixel(complex c) {

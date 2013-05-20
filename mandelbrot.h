@@ -6,12 +6,14 @@
 #include <SDL.h>
 #include <math.h>
 #include <stdbool.h>
+#include <mpi.h>
 //#include <complex.h> // c99
 
 #define SCREEN_RES_X 600
 #define SCREEN_RES_Y 600
 #define TICK_INTERVAL 30
 #define MAX_INTERATIONS 256
+#define PIXEL_TAG 1
 
 typedef struct complexnumber {
     double R;
