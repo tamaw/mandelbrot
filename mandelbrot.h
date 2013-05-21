@@ -14,6 +14,9 @@
 #define TICK_INTERVAL 30
 #define MAX_INTERATIONS 256
 #define PIXEL_TAG 1
+#define CONTROL_TAG 2
+#define ROW_TAG 3
+#define EXIT_SIG -1
 
 typedef struct complexnumber {
     double R;

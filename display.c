@@ -7,8 +7,9 @@ Uint32 timeleft();
 void DrawPixel(SDL_Surface *screen,
         int x, int y, Uint8 R, Uint8 G, Uint8 B);
 int cal_pixel(complex c);
-void static_div(int myid, int num_procs, char **pixels);
 void single_proc(char **pixels);
+void static_div(int myid, int num_procs, char **pixels);
+void dynamic_div(int myid, int num_procs, char **pixels);
 
 // main loop, updates bodies, draws them and handels events
 void run(int myid, int num_procs)
@@ -24,20 +25,26 @@ void run(int myid, int num_procs)
     for(int i = 0; i < SCREEN_RES_X; i++)
         pixels[i] = (char*) malloc(sizeof(char) * SCREEN_RES_X);
 
+    // todo barrier to wait for proc 0 with sdl
 
     // calculate each pixel
-    start_time = MPI_Wtime();
+    if(myid == 0) start_time = MPI_Wtime();
 
+    /*
     if(myid == 0) {
         single_proc(pixels);
         printf("time %f\n", MPI_Wtime() - start_time);
     }
+    */
+    static_div(myid, num_procs, pixels);
+    if(myid == 0)
+        printf("time %f\n", MPI_Wtime() - start_time);
 
-    while(running) {
 
-        // display the pixels
-        if(myid == 0) 
-        {
+    if(myid == 0) 
+    {
+        while(running) {
+            // display the pixels
             for(int y = 0; y < SCREEN_RES_Y; y++) {
                 for(int x = 0; x < SCREEN_RES_X && running; x++) {
                     colour = pixels[y][x];
@@ -57,6 +64,52 @@ void run(int myid, int num_procs)
     }
 }
 
+// dynamically assign rows to each processor
+void dynamic_div(int myid, int num_procs, char **pixels)
+{
+    complex c;
+    double ratioX = 4.0 / SCREEN_RES_X;
+    double ratioY = 4.0 / SCREEN_RES_Y;
+    int rows_low, rows_high, rows_div;
+    int index = 0;
+    char *row, *buffer;
+    MPI_Status status;
+        
+    if(myid == 0) // master creates threads to dispatches rows to slaves
+        int row = 0;
+        int control[num_procs];
+        MPI_Request request[num_procs];
+        buffer = (char*) malloc(sizeof(char) * SCREEN_RES_X);
+
+        // async recieve from all slaves
+        for(int i = 1; i < num_procs; i++) {
+            MPI_Irecv(&control[1], 1, MPI_INT, i, CONTROL_TAG, 
+                    MPI_COMM_WORLD, &request[i-1]);
+        }
+
+        // on any recieve send next row 
+        while(row != SCREEN_RES_Y) {
+            MPI_Waitany(num_procs-1, &request[1], &index, &status);
+
+            MPI_Send(&row, 1, MPI_INT, status.MPI_SOURCE,
+                    ROW_TAG, MPI_COMM_WORLD);
+            MPI_Irecv(buffer, 1, MPI_INT, i, CONTROL_TAG, 
+                    MPI_COMM_WORLD, &request[i-1]);
+        }
+
+        // tell all slaves to exit
+        for(int i = 1; i < num_procs i++) {
+            MPI_Request_free(request[i]); 
+            // todo bound here :(
+            MPI_Send(EXIT_SIG, 1, MPI_INT, i, ROW_TAG, MPI_COMM_WORLD);
+        }
+
+
+        
+        // wait for rows to complete
+    }
+}
+
 // assign each process a set number of tasks
 void static_div(int myid, int num_procs, char **pixels) 
 {
@@ -70,8 +123,10 @@ void static_div(int myid, int num_procs, char **pixels)
     // divide up the rows
     rows_div = SCREEN_RES_Y / num_procs;
     buffer = (char*) malloc(sizeof(char) * (rows_div * SCREEN_RES_X));
-    rows_high = rows_div * myid;
+    rows_high = rows_div * (myid +1);
     rows_low = rows_high - rows_div;
+
+    //printf("id:%d low:%d high:%d\n", myid, rows_low, rows_high);
 
     // each proc calculates the rows assigned
     for(int y = rows_low; y < rows_high; y++) {
@@ -91,24 +146,21 @@ void static_div(int myid, int num_procs, char **pixels)
                 buffer, rows_div * SCREEN_RES_X, &pos, MPI_COMM_WORLD);
     }
 
-    if(myid != 0) // send the buffer to the master
-        MPI_Send(buffer, pos, MPI_PACKED, PIXEL_TAG, 0, MPI_COMM_WORLD);
-
-
-    // recieve buffer and add to pixels
-    if(myid == 0) {
-        // i substitutes proc id
+    if(myid != 0) { // send the buffer to the master
+        //printf("sending from %d\n", myid);
+        MPI_Send(buffer, pos, MPI_PACKED, 0, PIXEL_TAG, MPI_COMM_WORLD);
+    } else { // recieve buffer and add to pixels
         for(int i = 1; i < num_procs; i++) {
-            rows_high = rows_div * i;
+            rows_high = rows_div * (i+1);
             rows_low = rows_high - rows_div;
 
+            //printf("waiting from %d\n", i);
             MPI_Recv(buffer, rows_div * SCREEN_RES_X, MPI_CHAR, i, 
                     PIXEL_TAG, MPI_COMM_WORLD, &status);
-            printf("recieved from %d\n", i);
 
             for(int y = rows_low, k = 0; y < rows_high; y++) {
                 for(int x = 0; x < SCREEN_RES_X; x++, k++) {
-                    buffer[k] = pixels[y][x];
+                    pixels[y][x] = buffer[k];
                 }
             }
         }
