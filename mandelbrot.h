@@ -16,7 +16,7 @@
 #define PIXEL_TAG 1
 #define CONTROL_TAG 2
 #define ROW_TAG 3
-#define EXIT_SIG -1
+#define ASSIGN_ROW_TAG 4
 
 typedef struct complexnumber {
     double R;
