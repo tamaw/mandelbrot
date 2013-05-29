@@ -45,22 +45,22 @@ void run(int myid, int num_procs)
 
     if(myid == 0) 
     {
-        while(running) {
-            // display the pixels
-            for(int y = 0; y < SCREEN_RES_Y; y++) {
-                for(int x = 0; x < SCREEN_RES_X && running; x++) {
-                    colour = pixels[y][x];
-                    DrawPixel(screen, x, y, colour, colour, colour);
-                }
+        // display the pixels
+        for(int y = 0; y < SCREEN_RES_Y; y++) {
+            for(int x = 0; x < SCREEN_RES_X && running; x++) {
+                colour = pixels[y][x];
+                DrawPixel(screen, x, y, colour, colour, colour);
+            }
+        }
+        SDL_Flip(screen);
 
-                // process incoming events
+        // proicess incoming events
+        while(running) {
                 while(SDL_PollEvent(&event))
                     if(event.type == SDL_QUIT)
                         running = false;
-            }
-
-            SDL_Flip(screen);
         }
+
 
         //SDL_Delay(timeleft()); // sleep for framerate
     }
@@ -71,37 +71,35 @@ void dynamic_div(int myid, int num_procs, char **pixels)
 {
     const double ratioX = 4.0 / SCREEN_RES_X;
     const double ratioY = 4.0 / SCREEN_RES_Y;
-    int end_row = -1;
     complex c;
     int index = 0;
-    char *row;
+    char *row = (char*) malloc(sizeof(char) * SCREEN_RES_X);
     MPI_Status status;
     int current_row = 0;
 
-    row = (char*) malloc(sizeof(char) * SCREEN_RES_X);
-
+    // slaves
     if(myid != 0) 
     {
+        // recieve first row
         MPI_Recv(&current_row, 1, MPI_INT, 0, ASSIGN_ROW_TAG,
                 MPI_COMM_WORLD, &status);
 
-
-        while(current_row >= 0) { // negitive row exits
+        while(current_row >= 0) {
 
             //printf("%d working on %d\n", myid, current_row);
 
+            // calculte the result and store into array
             c.I = ((SCREEN_RES_Y / 2) - current_row) * ratioY;
             for(int x = 0; x < SCREEN_RES_X; x++) {
                 c.R = (x - (SCREEN_RES_X / 2)) * ratioX;
                 row[x] = cal_pixel(c);
             }
 
-            // when finished send  row
+            // when finished send the array
             MPI_Send(&row, SCREEN_RES_X, MPI_INT, 0, ROW_TAG,
                     MPI_COMM_WORLD);
 
-            printf("%d row %d sent\n", myid, current_row);
-            MPI_Finalize(); exit(1);
+            //printf("%d row %d sent\n", myid, current_row);
 
             // get new row 
             MPI_Recv(&current_row, 1, MPI_INT, 0, ASSIGN_ROW_TAG,
@@ -109,67 +107,68 @@ void dynamic_div(int myid, int num_procs, char **pixels)
             //printf("%d got new row %d \n", myid, current_row);
         }
 
-        printf("proc %d done\n", myid);
-
     }
         
     if(myid == 0) { // master creates threads to dispatches rows to slaves
         char *buffer[num_procs];
         MPI_Request requests[num_procs];
-        // todo store what proc has what row here
+        int assigned_row[num_procs];
 
-        // give slaves there initial row
+        // give slaves there initial row and set up recieve
         for(int i = 1; i < num_procs; i++) {
             buffer[i] = (char*) malloc(sizeof(char) * SCREEN_RES_X);
+
             // set up to recieve from any slave
             MPI_Irecv(buffer[i], SCREEN_RES_X, MPI_INT,
                     MPI_ANY_SOURCE, ROW_TAG, MPI_COMM_WORLD, &requests[i]);
 
-            MPI_Send(&current_row, 1, MPI_INT, i, ASSIGN_ROW_TAG,
+            assigned_row[i] = current_row++;
+            MPI_Send(&assigned_row[i], 1, MPI_INT, i, ASSIGN_ROW_TAG,
                     MPI_COMM_WORLD);
-            current_row += 1;
         }
 
         // receive the row and send a new row assignment
         int procs_done = 1; // proc 0 is master, not counted 
-        while(procs_done < (num_procs)) {
+        for(;procs_done < (num_procs); current_row++) {
 
-            // wait for any response
+            MPI_Waitany(num_procs-procs_done, &requests[procs_done],
+                    &index, &status);
 
-            MPI_Waitany(num_procs-procs_done, &requests[procs_done], &index,
-                   &status);
-
-            //printf("got response from %d\n", status.MPI_SOURCE);
-            printf("compelte %d of %d\n", procs_done, num_procs-1);
-            procs_done++;
-            continue; // todo remove me
-
-            // todo add row to pixels maybe after sending new row
-
-            // send new row
-            current_row += 1;
             if(current_row < SCREEN_RES_Y) {
-                printf("sending row %d to %d\n", current_row,
-                        status.MPI_SOURCE);
+                //printf("sending row %d to %d\n", current_row, status.MPI_SOURCE);
+                // wait for a response from any remaing procs
+                //printf("waiting %d\n", num_procs - procs_done);
 
+
+                // todo add row to pixels maybe after sending new row
+                int y = assigned_row[(int)status.MPI_SOURCE];
+                //printf("adding row %d\n", y);
+                for(int x = 0; x < SCREEN_RES_X; x++) {
+                    pixels[y][x] = buffer[status.MPI_SOURCE][x];
+                }
+
+                // set back up the recieve for this proc
                 MPI_Irecv(buffer[status.MPI_SOURCE], SCREEN_RES_X, MPI_INT,
                         status.MPI_SOURCE, ROW_TAG, MPI_COMM_WORLD,
                         &requests[status.MPI_SOURCE]);
 
-                MPI_Send(&current_row, 1, MPI_INT, status.MPI_SOURCE,
-                        ASSIGN_ROW_TAG, MPI_COMM_WORLD);
+                // send the new row to be calculated
+                assigned_row[status.MPI_SOURCE] = current_row;
+                MPI_Send(&assigned_row[(int)status.MPI_SOURCE], 1, MPI_INT,
+                        status.MPI_SOURCE, ASSIGN_ROW_TAG, MPI_COMM_WORLD);
 
             } else { // send -1 when finished
-                printf("sending end row to %d\n", status.MPI_SOURCE);
+                printf("complete %d of %d\n", procs_done, num_procs-1);
+
                 procs_done += 1;
+                int end_row = END_ROW;
                 MPI_Send(&end_row, 1, MPI_INT, status.MPI_SOURCE,
                         ASSIGN_ROW_TAG, MPI_COMM_WORLD);
             }
-
         }
-        printf("!!master done\n");
     }
         
+    printf("%d proc done \n", myid);
 }
 
 // assign each process a set number of tasks

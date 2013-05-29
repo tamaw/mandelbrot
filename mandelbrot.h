@@ -17,6 +17,7 @@
 #define CONTROL_TAG 2
 #define ROW_TAG 3
 #define ASSIGN_ROW_TAG 4
+#define END_ROW -1
 
 typedef struct complexnumber {
     double R;
