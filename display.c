@@ -34,12 +34,11 @@ void run(int myid, int num_procs)
     /*
     if(myid == 0) {
         single_proc(pixels);
-        printf("time %f\n", MPI_Wtime() - start_time);
     }
     */
-    //static_div(myid, num_procs, pixels);
+    static_div(myid, num_procs, pixels);
     
-    dynamic_div(myid, num_procs, pixels);
+    //dynamic_div(myid, num_procs, pixels);
     if(myid == 0)
         printf("time %f\n", MPI_Wtime() - start_time);
 
@@ -108,8 +107,9 @@ void dynamic_div(int myid, int num_procs, char **pixels)
         }
 
     }
-        
-    if(myid == 0) { // master creates threads to dispatches rows to slaves
+
+    // master creates threads to dispatches rows to slaves
+    if(myid == 0) { 
         char *buffer[num_procs];
         MPI_Request requests[num_procs];
         int assigned_row[num_procs];
@@ -131,13 +131,11 @@ void dynamic_div(int myid, int num_procs, char **pixels)
         int procs_done = 1; // proc 0 is master, not counted 
         for(;procs_done < (num_procs); current_row++) {
 
-            MPI_Waitany(num_procs-procs_done, &requests[procs_done],
-                    &index, &status);
-
-            if(current_row < SCREEN_RES_Y) {
-                //printf("sending row %d to %d\n", current_row, status.MPI_SOURCE);
+            if(current_row <= SCREEN_RES_Y) {
                 // wait for a response from any remaing procs
                 //printf("waiting %d\n", num_procs - procs_done);
+                MPI_Waitany(num_procs-procs_done, &requests[procs_done],
+                        &index, &status);
 
 
                 // todo add row to pixels maybe after sending new row
@@ -145,6 +143,7 @@ void dynamic_div(int myid, int num_procs, char **pixels)
                 //printf("adding row %d\n", y);
                 for(int x = 0; x < SCREEN_RES_X; x++) {
                     pixels[y][x] = buffer[status.MPI_SOURCE][x];
+                    //pixels[y][x] = 16 * status.MPI_SOURCE;
                 }
 
                 // set back up the recieve for this proc
