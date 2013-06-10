@@ -1,0 +1,64 @@
+Mandelbrot set parallel benchmarks :
+
+This problem was solved on a single process and twice on parallel processors.
+
+The first parallel task statically divided up regions to calculate. the first x many pixels go to process 0 the next x many to process 1 and so forth.
+
+The second parallel task dynamically asynchronously assigns the rows. All processors start out with a initial row and once they complete it, they will requst the next row. This has surpising results!
+
+You can uncomment the lines to initiate any of these benchmarks. 
+All times are taken with MPI Time functions AFTER SDL has been initalised and before it is drawed. Resulting in only the calculation.
+
+$ make clean; make && mpiexec -n 6 ./bin/mandelbrot
+
+Comes packaged with SDL and make file should statically link it.
+
+--------------------------------
+Single processor base benchmark: ( 3 runs )
+
+time 0.151631
+time 0.153596
+time 0.151442
+
+---------------------------------
+Static divide parallel benchmark: (6 procs, 3 runs )
+time 0.003485
+time 0.003531
+time 0.003486
+
+--------------------------------
+process distribution with 6 process 1 master 5 slaves (3 runs )
+
+time 0.143192
+time 0.141960
+time 0.137935
+
+
+From our results you can see the static divide performs the fastest noticiably.
+My static divide actually saves the accumulated rows with row pack and sends them all the rows at once saving on network i/o.
+
+The dynamic allocation runs faster than the single processor but only by a fraction.
+This is using the async functions so the moment they are complete and send their computed row it should request the next row and not wait in a line.
+I had them output a different colour gray for each processor and surpisingly you can see only 2 will do most of the processing work.
+The 3rd process comes in once or twice but never and the other processors don't even finish! 
+Notice the different shades in each image signaling that it's a different each time.
+
+This resulted in the program not displaying the first few rows as the master process has already sent them the end row before they got a chance to send their processed row!
+The delay in the network may be a factor on this or possible something to do with the queue in MPI itself.
+For the dynamic rows, if i dropped the processors to 2 we had a noticable increase in speed however for 3 procesors up to 6 it was roughly the same.
+
+
+Although dynamically assigning the rows should in theory be faster because we don't have to wait on the slowest processor to finish, it was in fact slower.
+MPI seamed to favour scheduling only two processors even in the tougher regions of the algorithm which leads me to believe the intercommunication i/o exceeds that of even the hardest to calculate row.
+
+The static algorithm packed all the rows into one transfer this in practise was the fastest solution to the problem.
+It was hard to find an increase in speed past 6 processors. 7 procs occasionally had faster results but not consistantly enough to warrent increasing it.
+After 8 processors performance wasn't as reliable to measure and frequently showed slower results than 6 processors.
+10+ processors was roughly twice the time compared to 6 processors.
+
+In conclusion parallel computing did show a significant increase in computation compared to single processor on this assignment.
+However due to caches, I/O setup & communication it seams dynamically assignin tasks resulted in a tiny fraction faster at 6 procs.
+Think about minimizing I/O like in the static packed algorithm!
+
+
+

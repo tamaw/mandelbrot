@@ -11,4 +11,4 @@ echo Time is `date`
 echo Directory is `pwd`
 cd ~/assignment1/
 echo Directory is `pwd`
-mpiexec -hostfile hostfile -np 16 ./bin/nbody > nbody_output
+mpiexec -hostfile hostfile -np 16 ./bin/mandelbrot > output
